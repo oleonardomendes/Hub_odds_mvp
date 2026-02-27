@@ -1,0 +1,198 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Odds MVP (manual)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 16px; max-width: 980px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; }
+    input, select { padding: 10px; border-radius: 10px; border: 1px solid #ccc; width: 100%; }
+    button { padding: 12px 14px; border-radius: 10px; border: 0; background: #111; color: white; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #eee; padding: 10px; text-align: left; }
+    small { color: #666; }
+    .row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .pill { display: inline-block; padding: 4px 10px; border-radius: 999px; border: 1px solid #ddd; font-size: 12px; }
+    .ok { border-color: #1a7f37; color: #1a7f37; }
+    .warn { border-color: #b54708; color: #b54708; }
+    .bad { border-color: #cf222e; color: #cf222e; }
+    pre { background: #fafafa; padding: 12px; border-radius: 12px; overflow:auto; }
+  </style>
+</head>
+<body>
+  <h1>Odds MVP (manual odds)</h1>
+  <p><small>Selecione um jogo, informe o mercado e a odd. O app calcula probabilidade (modelo), probabilidade implícita, EV e risco.</small></p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="row">
+        <div>
+          <label>Buscar jogo (time)</label>
+          <input id="q" placeholder="Ex: Arsenal, Real, Inter..."/>
+        </div>
+        <div>
+          <label>Competição</label>
+          <select id="competition"></select>
+        </div>
+        <div style="display:flex; align-items:end;">
+          <button onclick="loadMatches()">Buscar</button>
+        </div>
+      </div>
+
+      <div style="margin-top:14px;">
+        <label>Jogo</label>
+        <select id="match"></select>
+      </div>
+
+      <div class="row2" style="margin-top:14px;">
+        <div>
+          <label>Mercado</label>
+          <select id="market">
+            <option value="ou25">Over/Under 2.5</option>
+            <option value="btts">Ambos marcam (BTTS)</option>
+          </select>
+        </div>
+        <div>
+          <label>Seleção</label>
+          <select id="selection"></select>
+        </div>
+      </div>
+
+      <div class="row2" style="margin-top:14px;">
+        <div>
+          <label>Odd decimal</label>
+          <input id="odd" value="1.95"/>
+        </div>
+        <div>
+          <label>Lookback (últimos N jogos)</label>
+          <input id="lookback" value="10"/>
+        </div>
+      </div>
+
+      <div style="margin-top:14px;">
+        <button onclick="evaluate()">Calcular</button>
+      </div>
+    </div>
+
+    <div class="card" id="resultCard" style="display:none;">
+      <h3>Resultado</h3>
+      <div id="summary"></div>
+      <h4>Detalhes</h4>
+      <pre id="json"></pre>
+    </div>
+  </div>
+
+  <script>
+    const selectionByMarket = {
+      "ou25": [
+        {value:"over", label:"Over 2.5"},
+        {value:"under", label:"Under 2.5"}
+      ],
+      "btts": [
+        {value:"yes", label:"Sim (BTTS)"},
+        {value:"no", label:"Não (BTTS)"}
+      ]
+    };
+
+    function setSelections() {
+      const m = document.getElementById("market").value;
+      const sel = document.getElementById("selection");
+      sel.innerHTML = "";
+      selectionByMarket[m].forEach(o => {
+        const opt = document.createElement("option");
+        opt.value = o.value;
+        opt.textContent = o.label;
+        sel.appendChild(opt);
+      });
+    }
+
+    async function init() {
+      setSelections();
+      document.getElementById("market").addEventListener("change", setSelections);
+
+      const comps = await fetch("/api/competitions").then(r=>r.json());
+      const csel = document.getElementById("competition");
+      const optAll = document.createElement("option");
+      optAll.value = "";
+      optAll.textContent = "Todas";
+      csel.appendChild(optAll);
+      comps.forEach(c => {
+        const opt = document.createElement("option");
+        opt.value = c.id;
+        opt.textContent = `${c.country} — ${c.name} (${c.season_year})`;
+        csel.appendChild(opt);
+      });
+      await loadMatches();
+    }
+
+    async function loadMatches() {
+      const q = document.getElementById("q").value || "";
+      const competition_id = document.getElementById("competition").value;
+      const url = new URL("/api/matches", window.location.origin);
+      if (q) url.searchParams.set("q", q);
+      if (competition_id) url.searchParams.set("competition_id", competition_id);
+      const matches = await fetch(url).then(r=>r.json());
+
+      const msel = document.getElementById("match");
+      msel.innerHTML = "";
+      matches.slice(0, 80).forEach(m => {
+        const opt = document.createElement("option");
+        opt.value = m.id;
+        const score = (m.status === "finished") ? ` (${m.home_score}-${m.away_score})` : "";
+        opt.textContent = `${m.kickoff_utc.replace('T',' ').slice(0,16)} — ${m.home_team_name} vs ${m.away_team_name}${score} — ${m.competition_name}`;
+        msel.appendChild(opt);
+      });
+    }
+
+    function pill(risk) {
+      if (risk === "BAIXO") return '<span class="pill ok">RISCO BAIXO</span>';
+      if (risk === "MEDIO") return '<span class="pill warn">RISCO MÉDIO</span>';
+      return '<span class="pill bad">RISCO ALTO</span>';
+    }
+
+    async function evaluate() {
+      const match_id = parseInt(document.getElementById("match").value, 10);
+      const market = document.getElementById("market").value;
+      const selection = document.getElementById("selection").value;
+      const odd = parseFloat(document.getElementById("odd").value);
+      const lookback = parseInt(document.getElementById("lookback").value, 10);
+
+      const payload = {match_id, market, selection, odd, lookback};
+      const res = await fetch("/api/evaluate", {
+        method:"POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
+      }).then(r=>r.json());
+
+      document.getElementById("resultCard").style.display = "block";
+      const edgePct = (res.edge*100).toFixed(1);
+      const pModelPct = (res.p_model*100).toFixed(1);
+      const pOddPct = (res.p_odd*100).toFixed(1);
+      const evPct = (res.ev*100).toFixed(1);
+
+      document.getElementById("summary").innerHTML = `
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          ${pill(res.risk)}
+          <span class="pill">Confiança: ${res.confidence}/100</span>
+          <span class="pill">P(modelo): ${pModelPct}%</span>
+          <span class="pill">P(odd): ${pOddPct}%</span>
+          <span class="pill">Edge: ${edgePct} pp</span>
+          <span class="pill">EV: ${evPct}%</span>
+        </div>
+        <div style="margin-top:10px;">
+          <strong>Lambdas (Poisson)</strong>: λ_home=${res.lambda_home.toFixed(2)} | λ_away=${res.lambda_away.toFixed(2)}
+        </div>
+        <ul>
+          ${res.reasons.map(x=>`<li><strong>${x.label}</strong>: ${x.value}</li>`).join("")}
+        </ul>
+      `;
+      document.getElementById("json").textContent = JSON.stringify(res, null, 2);
+    }
+
+    init();
+  </script>
+</body>
+</html>
