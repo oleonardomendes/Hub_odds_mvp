@@ -1,35 +1,39 @@
 import os
-from fastapi import HTTPException
-from .sync_footballdata import sync_competition
-from fastapi import FastAPI, Request
+
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-
+from .db import get_db
 from .models import EvaluateRequest, EvaluateResponse, Reason
 from .repository import list_competitions, search_matches, get_match
 from .features import estimate_lambdas
 from .poisson import prob_over_25, prob_btts_yes
 from .risk import compute_confidence
+from .sync_footballdata import sync_competition
 
 app = FastAPI(title="Odds MVP (manual)", version="0.1.0")
 templates = Jinja2Templates(directory="app/templates")
+
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
+
 @app.get("/api/competitions")
 def api_competitions():
     return list_competitions()
+
 
 @app.get("/api/matches")
 def api_matches(q: str = "", competition_id: int | None = None, limit: int = 80):
     return search_matches(q=q, competition_id=competition_id, limit=limit)
 
+
 @app.get("/api/matches/{match_id}")
 def api_match(match_id: int):
     return get_match(match_id)
+
 
 @app.post("/api/evaluate", response_model=EvaluateResponse)
 def api_evaluate(req: EvaluateRequest):
@@ -53,12 +57,20 @@ def api_evaluate(req: EvaluateRequest):
     edge = p_model - p_odd
     ev = p_model * req.odd - 1.0
 
-    confidence, risk = compute_confidence(edge=edge, home_n=feats["home_n"], away_n=feats["away_n"],
-                                        lam_home=lam_home, lam_away=lam_away)
+    confidence, risk = compute_confidence(
+        edge=edge,
+        home_n=feats["home_n"],
+        away_n=feats["away_n"],
+        lam_home=lam_home,
+        lam_away=lam_away,
+    )
 
     reasons = [
         Reason(label="Jogo", value=f'{m["home_team_name"]} vs {m["away_team_name"]} — {m["competition_name"]}'),
-        Reason(label="Dados recentes", value=f'home_n={feats["home_n"]} | away_n={feats["away_n"]} | lookback={req.lookback}'),
+        Reason(
+            label="Dados recentes",
+            value=f'home_n={feats["home_n"]} | away_n={feats["away_n"]} | lookback={req.lookback}',
+        ),
         Reason(label="Média liga (home/away)", value=f'{feats["league_avg_home"]:.2f} / {feats["league_avg_away"]:.2f}'),
     ]
 
@@ -71,7 +83,7 @@ def api_evaluate(req: EvaluateRequest):
     if feats.get("home_ga_home_avg") is not None:
         reasons.append(Reason(label="Home (gols sofridos em casa, últimos N)", value=f'{feats["home_ga_home_avg"]:.2f}'))
 
-    # risk-reduction guardrails (added as reasons)
+    # risk-reduction guardrails
     if edge < 0.03:
         reasons.append(Reason(label="Alerta (edge)", value="Edge < 3pp → sinal fraco para reduzir risco."))
     if feats["home_n"] < 5 or feats["away_n"] < 5:
@@ -93,6 +105,7 @@ def api_evaluate(req: EvaluateRequest):
         lambda_away=float(lam_away),
     )
 
+
 @app.post("/admin/sync_fd")
 def admin_sync_fd(token: str, code: str, season: int, date_from: str, date_to: str):
     expected = os.getenv("SYNC_TOKEN", "")
@@ -100,7 +113,8 @@ def admin_sync_fd(token: str, code: str, season: int, date_from: str, date_to: s
         raise HTTPException(status_code=401, detail="Token inválido")
     return sync_competition(code=code.upper(), season_year=season, date_from=date_from, date_to=date_to)
 
-    @app.post("/admin/reset_db")
+
+@app.post("/admin/reset_db")
 def admin_reset_db(token: str):
     expected = os.getenv("SYNC_TOKEN", "")
     if expected and token != expected:
