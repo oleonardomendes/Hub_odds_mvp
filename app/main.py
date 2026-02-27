@@ -99,3 +99,15 @@ def admin_sync_fd(token: str, code: str, season: int, date_from: str, date_to: s
     if expected and token != expected:
         raise HTTPException(status_code=401, detail="Token inválido")
     return sync_competition(code=code.upper(), season_year=season, date_from=date_from, date_to=date_to)
+
+    @app.post("/admin/reset_db")
+def admin_reset_db(token: str):
+    expected = os.getenv("SYNC_TOKEN", "")
+    if expected and token != expected:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+    with get_db() as con:
+        con.execute("DELETE FROM matches;")
+        con.execute("DELETE FROM teams;")
+        con.execute("DELETE FROM competitions;")
+    return {"ok": True}

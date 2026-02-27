@@ -104,7 +104,7 @@
       selectionByMarket[m].forEach(o => {
         const opt = document.createElement("option");
         opt.value = o.value;
-        opt.textContent = o.label;
+        opt.textContentsrc = o.label;
         sel.appendChild(opt);
       });
     }
@@ -142,6 +142,7 @@
         const opt = document.createElement("option");
         opt.value = m.id;
         const score = (m.status === "finished") ? ` (${m.home_score}-${m.away_score})` : "";
+        const src = m.provider_id ? " ✅REAL" : " ⚠️LOCAL";
         opt.textContent = `${m.kickoff_utc.replace('T',' ').slice(0,16)} — ${m.home_team_name} vs ${m.away_team_name}${score} — ${m.competition_name}`;
         msel.appendChild(opt);
       });
