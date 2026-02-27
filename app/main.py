@@ -1,3 +1,6 @@
+import os
+from fastapi import HTTPException
+from .sync_footballdata import sync_competition
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -89,3 +92,10 @@ def api_evaluate(req: EvaluateRequest):
         lambda_home=float(lam_home),
         lambda_away=float(lam_away),
     )
+
+@app.post("/admin/sync_fd")
+def admin_sync_fd(token: str, code: str, season: int, date_from: str, date_to: str):
+    expected = os.getenv("SYNC_TOKEN", "")
+    if expected and token != expected:
+        raise HTTPException(status_code=401, detail="Token inválido")
+    return sync_competition(code=code.upper(), season_year=season, date_from=date_from, date_to=date_to)
